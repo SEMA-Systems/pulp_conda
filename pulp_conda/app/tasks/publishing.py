@@ -25,11 +25,10 @@ def publish_package(repository_pk, package_pk):
     """
 
     repository = CondaRepository.objects.get(pk=repository_pk)
-    package = Package.objects.get(pk=package_pk)
     distribution = CondaDistribution.objects.get(repository=repository)
 
     with repository.new_version(base_version=repository.latest_version()) as new_version:
-        new_version.add_content(Package.objects.filter(pk=package.pk))
+        new_version.add_content(Package.objects.filter(pk=package_pk))
 
     distribution.repository_version = new_version
     distribution.save()
@@ -44,7 +43,6 @@ def publish_repodata(repository_pk, repodata_pk):
     """
 
     repository = CondaRepository.objects.get(pk=repository_pk)
-    repodata = Repodata.objects.get(pk=repodata_pk)
     distribution = CondaDistribution.objects.get(repository=repository)
 
     with repository.new_version(base_version=repository.latest_version()) as new_version:
@@ -52,7 +50,7 @@ def publish_repodata(repository_pk, repodata_pk):
         # All objects = last uploaded repodata.json. This is needed because otherwise there are two files with the same
         # relative_path and Pulp does not know which one to serve.
         new_version.remove_content(Repodata.objects.all())
-        new_version.add_content(Repodata.objects.filter(pk=repodata.pk))
+        new_version.add_content(Repodata.objects.filter(pk=repodata_pk))
 
     distribution.repository_version = new_version
     distribution.save()

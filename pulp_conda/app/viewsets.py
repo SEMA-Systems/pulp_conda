@@ -55,7 +55,6 @@ class PackageViewSet(core.SingleArtifactContentUploadViewSet):
         Handle conda package upload.
         """
 
-        # TODO: Wrap this in a try/catch block to check if file and repository are provided in the request
         file = request.data["file"]
         repository_name = request.data["repository"]
 
@@ -74,7 +73,6 @@ class PackageViewSet(core.SingleArtifactContentUploadViewSet):
             artifact = Artifact.from_pulp_temporary_file(temp_file)
         except Exception:
             temp_file.delete()
-            # TODO: send correct response
             return None
 
         data = {
@@ -114,7 +112,6 @@ class PackageViewSet(core.SingleArtifactContentUploadViewSet):
             return core.OperationPostponedResponse(result, request)
         else:
             artifact.delete()
-            # TODO: send correct response
             return None
 
 class RepodataFilter(core.ContentFilter):
@@ -150,7 +147,6 @@ class RepodataViewSet(core.SingleArtifactContentUploadViewSet):
         Handle repodata.json upload.
         """
 
-        # TODO: Wrap this in a try/catch block to check if file and repository are provided in the request
         file = request.data["file"]
         repository_name = request.data["repository"]
 
@@ -163,7 +159,6 @@ class RepodataViewSet(core.SingleArtifactContentUploadViewSet):
             artifact = Artifact.from_pulp_temporary_file(temp_file)
         except Exception:
             temp_file.delete()
-            # TODO: send correct response
             return None
 
         data = {
@@ -197,7 +192,6 @@ class RepodataViewSet(core.SingleArtifactContentUploadViewSet):
             return core.OperationPostponedResponse(result, request)
         else:
             artifact.delete()
-            # TODO: send correct response
             return None
 
 class CondaRemoteFilter(RemoteFilter):
