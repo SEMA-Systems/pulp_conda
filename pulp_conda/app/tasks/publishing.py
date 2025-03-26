@@ -9,46 +9,50 @@ from pulpcore.plugin.models import (
     RemoteArtifact,
 )
 
-from pulp_conda.app.models import CondaPublication
+from pulp_conda.app.models import CondaRepository, Repodata, Package, CondaDistribution
 
 
 log = logging.getLogger(__name__)
 
 
-def publish(repository_version_pk):
+def publish_package(repository_pk, package_pk):
     """
-    Create a Publication based on a RepositoryVersion.
+    Create a new Repository version when a new package is uploaded and switch distribution to new version.
 
     Args:
-        repository_version_pk (str): Create a publication from this repository version.
+        repository_pk (str): Create a new version for this repository.
+        package_pk (str): Add this package to the new repository version.
     """
-    repository_version = RepositoryVersion.objects.get(pk=repository_version_pk)
 
-    log.info(
-        _("Publishing: repository={repo}, version={ver}").format(
-            repo=repository_version.repository.name,
-            ver=repository_version.number,
-        )
-    )
-    with tempfile.TemporaryDirectory("."):
-        with CondaPublication.create(repository_version) as publication:
-            # Write any Artifacts (files) to the file system, and the database.
-            #
-            # artifact = YourArtifactWriter.write(relative_path)
-            # published_artifact = PublishedArtifact(
-            #     relative_path=artifact.relative_path,
-            #     publication=publication,
-            #     content_artifact=artifact)
-            # published_artifact.save()
+    repository = CondaRepository.objects.get(pk=repository_pk)
+    package = Package.objects.get(pk=package_pk)
+    distribution = CondaDistribution.objects.get(repository=repository)
 
-            # Write any metadata files to the file system, and the database.
-            #
-            # metadata = YourMetadataWriter.write(relative_path)
-            # metadata = PublishedMetadata(
-            #     relative_path=os.path.basename(manifest.relative_path),
-            #     publication=publication,
-            #     file=File(open(manifest.relative_path, "rb")))
-            # metadata.save()
-            pass
+    with repository.new_version(base_version=repository.latest_version()) as new_version:
+        new_version.add_content(Package.objects.filter(pk=package.pk))
 
-    log.info(_("Publication: {publication} created").format(publication=publication.pk))
+    distribution.repository_version = new_version
+    distribution.save()
+
+def publish_repodata(repository_pk, repodata_pk):
+    """
+    Create a new Repository version when a new repodata is uploaded and switch distribution to new version.
+
+    Args:
+        repository_pk (str): Create a new version for this repository.
+        repodata_pk (str): Add this repodata.json to the new repository version.
+    """
+
+    repository = CondaRepository.objects.get(pk=repository_pk)
+    repodata = Repodata.objects.get(pk=repodata_pk)
+    distribution = CondaDistribution.objects.get(repository=repository)
+
+    with repository.new_version(base_version=repository.latest_version()) as new_version:
+        # Since there should always only be one repodata.json in a given repository, it is save to delete all objects.
+        # All objects = last uploaded repodata.json. This is needed because otherwise there are two files with the same
+        # relative_path and Pulp does not know which one to serve.
+        new_version.remove_content(Repodata.objects.all())
+        new_version.add_content(Repodata.objects.filter(pk=repodata.pk))
+
+    distribution.repository_version = new_version
+    distribution.save()

@@ -9,7 +9,7 @@ from pulpcore.plugin.stages import (
     Stage,
 )
 
-from pulp_conda.app.models import CondaContent, CondaRemote
+from pulp_conda.app.models import Package, CondaRemote
 
 
 log = logging.getLogger(__name__)
