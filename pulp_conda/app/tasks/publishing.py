@@ -30,9 +30,6 @@ def publish_package(repository_pk, package_pk):
     with repository.new_version() as new_version:
         new_version.add_content(Package.objects.filter(pk=package_pk))
 
-    distribution.repository_version = new_version
-    distribution.save()
-
 def publish_repodata(repository_pk, repodata_pk):
     """
     Create a new Repository version when a new repodata is uploaded and switch distribution to new version.
@@ -51,6 +48,3 @@ def publish_repodata(repository_pk, repodata_pk):
         # relative_path and Pulp does not know which one to serve.
         new_version.remove_content(Repodata.objects.all())
         new_version.add_content(Repodata.objects.filter(pk=repodata_pk))
-
-    distribution.repository_version = new_version
-    distribution.save()
