@@ -25,7 +25,6 @@ def publish_package(repository_pk, package_pk):
     """
 
     repository = CondaRepository.objects.get(pk=repository_pk)
-    distribution = CondaDistribution.objects.get(repository=repository)
 
     with repository.new_version() as new_version:
         new_version.add_content(Package.objects.filter(pk=package_pk))
@@ -40,7 +39,6 @@ def publish_repodata(repository_pk, repodata_pk):
     """
 
     repository = CondaRepository.objects.get(pk=repository_pk)
-    distribution = CondaDistribution.objects.get(repository=repository)
 
     with repository.new_version() as new_version:
         # Since there should always only be one repodata.json in a given repository, it is save to delete all objects.
