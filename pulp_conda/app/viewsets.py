@@ -68,12 +68,12 @@ class PackageViewSet(core.SingleArtifactContentUploadViewSet):
 
         repository = models.CondaRepository.objects.get(name=repository_name)
 
+        # This fails if an artifact with the same digest and pulp_domain_id already exists.
         try:
             temp_file = PulpTemporaryFile(file=file)
             artifact = Artifact.from_pulp_temporary_file(temp_file)
         except Exception:
             temp_file.delete()
-            return None
 
         data = {
             "name": name,
@@ -86,23 +86,30 @@ class PackageViewSet(core.SingleArtifactContentUploadViewSet):
         serializer = serializers.PackageSerializer(data=data)
         serializer.is_valid(raise_exception=True)
 
-        package = models.Package.objects.filter(name=name, version=version, build=build, extension=extension).first()
+        # We check if the package already exists in the specified repository
+        package = models.Package.objects.filter(name=name, version=version, build=build, extension=extension, repositories=repository).first()
         if not package:
-            package = models.Package(
-                name = name,
-                version = version,
-                build = build,
-                extension = extension,
-            )
+            try:
+                package = models.Package(
+                    name = name,
+                    version = version,
+                    build = build,
+                    extension = extension,
+                )
 
-            package.save()
+                # This fails if a package with these values already exists, e.g. in another repository.
+                package.save()
 
-            ContentArtifact.objects.create(
-                content = package,
-                artifact = artifact,
-                relative_path = package.relative_path,
-            )
+                ContentArtifact.objects.create(
+                    content = package,
+                    artifact = artifact,
+                    relative_path = package.relative_path,
+                )
+            except Exception:
+                # We now know that the package exists and fetch it.
+                package = models.Package.objects.filter(name=name, version=version, build=build, extension=extension).first()
 
+            # Attach the package to the specified repository.
             result = dispatch(
                 tasks.publish_package,
                 kwargs = {"repository_pk": repository.pk, "package_pk": package.pk},
@@ -111,8 +118,7 @@ class PackageViewSet(core.SingleArtifactContentUploadViewSet):
 
             return core.OperationPostponedResponse(result, request)
         else:
-            artifact.delete()
-            return None
+            return Response("Package already exists in specified repository.")
 
 class RepodataFilter(core.ContentFilter):
     """
