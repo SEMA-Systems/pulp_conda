@@ -1,51 +1,52 @@
-"""
-Check `Plugin Writer's Guide`_ for more details.
-
-.. _Plugin Writer's Guide:
-    https://pulpproject.org/pulpcore/docs/dev/
-"""
-
 from gettext import gettext as _
-
 from rest_framework import serializers
 
-from pulpcore.plugin import serializers as platform
+from pulpcore.plugin import serializers as core_serializers
+from pulpcore.plugin import models as core_models
+from pulpcore.plugin.util import get_domain_pk
 
 from . import models
 
 
-# FIXME: SingleArtifactContentSerializer might not be the right choice for you.
-# If your content type has no artifacts per content unit, use "NoArtifactContentSerializer".
-# If your content type has many artifacts per content unit, use "MultipleArtifactContentSerializer"
-# If you want create content through upload, use "SingleArtifactContentUploadSerializer"
-# If you change this, make sure to do so on "fields" below, also.
-# Make sure your choice here matches up with the create() method of your viewset.
-class CondaContentSerializer(platform.SingleArtifactContentSerializer):
+class PackageSerializer(core_serializers.SingleArtifactContentUploadSerializer):
     """
-    A Serializer for CondaContent.
+    A serializer for Package.
+    """
 
-    Add serializers for the new fields defined in CondaContent and
-    add those fields to the Meta class keeping fields from the parent class as well.
-
-    For example::
-
-    field1 = serializers.TextField()
-    field2 = serializers.IntegerField()
-    field3 = serializers.CharField()
+    name = serializers.CharField()
+    version = serializers.CharField()
+    build = serializers.CharField()
+    extension = serializers.CharField()
+    relative_path = serializers.CharField()
 
     class Meta:
-        fields = platform.SingleArtifactContentSerializer.Meta.fields + (
-            'field1', 'field2', 'field3'
+        fields = core_serializers.SingleArtifactContentUploadSerializer.Meta.fields + (
+            "name",
+            "version",
+            "build",
+            "extension",
+            "relative_path",
         )
-        model = models.CondaContent
+        model = models.Package
+
+class RepodataSerializer(core_serializers.SingleArtifactContentUploadSerializer):
+    """
+    A serializer for Repodata.
     """
 
+    digest = serializers.CharField()
+    relative_path = serializers.CharField()
+
     class Meta:
-        fields = platform.SingleArtifactContentSerializer.Meta.fields
-        model = models.CondaContent
+        fields = (
+            core_serializers.SingleArtifactContentUploadSerializer.Meta.fields + (
+                "digest",
+                "relative_path",
+            )
+        )
+        model = models.Repodata
 
-
-class CondaRemoteSerializer(platform.RemoteSerializer):
+class CondaRemoteSerializer(core_serializers.RemoteSerializer):
     """
     A Serializer for CondaRemote.
 
@@ -71,11 +72,11 @@ class CondaRemoteSerializer(platform.RemoteSerializer):
     """
 
     class Meta:
-        fields = platform.RemoteSerializer.Meta.fields
+        fields = core_serializers.RemoteSerializer.Meta.fields
         model = models.CondaRemote
 
 
-class CondaRepositorySerializer(platform.RepositorySerializer):
+class CondaRepositorySerializer(core_serializers.RepositorySerializer):
     """
     A Serializer for CondaRepository.
 
@@ -90,11 +91,11 @@ class CondaRepositorySerializer(platform.RepositorySerializer):
     """
 
     class Meta:
-        fields = platform.RepositorySerializer.Meta.fields
+        fields = core_serializers.RepositorySerializer.Meta.fields
         model = models.CondaRepository
 
 
-class CondaPublicationSerializer(platform.PublicationSerializer):
+class CondaPublicationSerializer(core_serializers.PublicationSerializer):
     """
     A Serializer for CondaPublication.
 
@@ -109,11 +110,11 @@ class CondaPublicationSerializer(platform.PublicationSerializer):
     """
 
     class Meta:
-        fields = platform.PublicationSerializer.Meta.fields
+        fields = core_serializers.PublicationSerializer.Meta.fields
         model = models.CondaPublication
 
 
-class CondaDistributionSerializer(platform.DistributionSerializer):
+class CondaDistributionSerializer(core_serializers.DistributionSerializer):
     """
     A Serializer for CondaDistribution.
 
@@ -128,13 +129,14 @@ class CondaDistributionSerializer(platform.DistributionSerializer):
             myValidator1, myValidator2]
     """
 
-    publication = platform.DetailRelatedField(
+    remote = core_serializers.DetailRelatedField(
         required=False,
-        help_text=_("Publication to be served"),
-        view_name_pattern=r"publications(-.*/.*)?-detail",
-        queryset=models.Publication.objects.exclude(complete=False),
+        help_text=_("Remote that can be used to fetch content when using pull-through caching."),
+        view_name_pattern=r"remotes(-.*/.*)?-detail",
+        queryset=core_models.Remote.objects.all(),
         allow_null=True,
     )
+
 
     # uncomment these lines and remove the publication field if not using publications
     # repository_version = RepositoryVersionRelatedField(
@@ -142,5 +144,5 @@ class CondaDistributionSerializer(platform.DistributionSerializer):
     # )
 
     class Meta:
-        fields = platform.DistributionSerializer.Meta.fields + ("publication",)
+        fields = core_serializers.DistributionSerializer.Meta.fields + ("remote",)
         model = models.CondaDistribution

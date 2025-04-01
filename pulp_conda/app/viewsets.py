@@ -1,11 +1,5 @@
-"""
-Check `Plugin Writer's Guide`_ for more details.
-
-.. _Plugin Writer's Guide:
-    https://pulpproject.org/pulpcore/docs/dev/
-"""
-
 from django.db import transaction
+from django_filters import CharFilter
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -19,93 +13,192 @@ from pulpcore.plugin.serializers import (
     RepositorySyncURLSerializer,
 )
 from pulpcore.plugin.tasking import dispatch
-from pulpcore.plugin.models import ContentArtifact
+from pulpcore.plugin.models import ContentArtifact, Artifact, PulpTemporaryFile
+
 
 from . import models, serializers, tasks
 
+from .utils import extract_package_info
 
-class CondaContentFilter(core.ContentFilter):
+
+class PackageFilter(core.ContentFilter):
     """
-    FilterSet for CondaContent.
+    FilterSet for Package.
     """
 
     class Meta:
-        model = models.CondaContent
+        model = models.Package
         fields = [
             # ...
         ]
 
 
-class CondaContentViewSet(core.ContentViewSet):
+class PackageViewSet(core.SingleArtifactContentUploadViewSet):
     """
-    A ViewSet for CondaContent.
+    A ViewSet for Package.
 
     Define endpoint name which will appear in the API endpoint for this content type.
     For example::
-        https://pulp.example.com/pulp/api/v3/content/conda/units/
+        https://pulp.example.com/pulp/api/v3/content/conda/packages/
 
-    Also specify queryset and serializer for CondaContent.
+    Also specify queryset and serializer for Package.
     """
 
-    endpoint_name = "conda"
-    queryset = models.CondaContent.objects.all()
-    serializer_class = serializers.CondaContentSerializer
-    filterset_class = CondaContentFilter
+    endpoint_name = "packages"
+    queryset = models.Package.objects.all()
+    serializer_class = serializers.PackageSerializer
+    filterset_class = PackageFilter
 
     @transaction.atomic
     def create(self, request):
         """
-        Perform bookkeeping when saving Content.
-
-        "Artifacts" need to be popped off and saved indpendently, as they are not actually part
-        of the Content model.
+        Handle conda package upload.
         """
-        return Response({}, status=status.HTTP_501_NOT_IMPLEMENTED)
-        # This requires some choice. Depending on the properties of your content type - whether it
-        # can have zero, one, or many artifacts associated with it, and whether any properties of
-        # the artifact bleed into the content type (such as the digest), you may want to make
-        # those changes here.
 
-        serializer = self.get_serializer(data=request.data)
+        file = request.data["file"]
+        repository_name = request.data["repository"]
+
+        if not repository_name:
+            return None
+
+        name, version, build, extension = extract_package_info(file.name)
+
+        if None in [name, version, build, extension]:
+            return None
+
+        repository = models.CondaRepository.objects.get(name=repository_name)
+
+        # This fails if an artifact with the same digest and pulp_domain_id already exists.
+        try:
+            temp_file = PulpTemporaryFile(file=file)
+            artifact = Artifact.from_pulp_temporary_file(temp_file)
+        except Exception:
+            temp_file.delete()
+
+        data = {
+            "name": name,
+            "version": version,
+            "build": build,
+            "extension": extension,
+            "relative_path": f"{name}-{version}-{build}.{extension}",
+        }
+
+        serializer = serializers.PackageSerializer(data=data)
         serializer.is_valid(raise_exception=True)
 
-        # A single artifact per content, serializer subclasses SingleArtifactContentSerializer
-        # ======================================
-        # _artifact = serializer.validated_data.pop("_artifact")
-        # # you can save model fields directly, e.g. .save(digest=_artifact.sha256)
-        # content = serializer.save()
-        #
-        # if content.pk:
-        #     ContentArtifact.objects.create(
-        #         artifact=artifact,
-        #         content=content,
-        #         relative_path= ??
-        #     )
-        # =======================================
+        # We check if the package already exists in the specified repository
+        package = models.Package.objects.filter(name=name, version=version, build=build, extension=extension, repositories=repository).first()
+        if not package:
+            try:
+                package = models.Package(
+                    name = name,
+                    version = version,
+                    build = build,
+                    extension = extension,
+                )
 
-        # Many artifacts per content, serializer subclasses MultipleArtifactContentSerializer
-        # =======================================
-        # _artifacts = serializer.validated_data.pop("_artifacts")
-        # content = serializer.save()
-        #
-        # if content.pk:
-        #   # _artifacts is a dictionary of {"relative_path": "artifact"}
-        #   for relative_path, artifact in _artifacts.items():
-        #       ContentArtifact.objects.create(
-        #           artifact=artifact,
-        #           content=content,
-        #           relative_path=relative_path
-        #       )
-        # ========================================
+                # This fails if a package with these values already exists, e.g. in another repository.
+                package.save()
 
-        # No artifacts, serializer subclasses NoArtifactContentSerialier
-        # ========================================
-        # content = serializer.save()
-        # ========================================
+                ContentArtifact.objects.create(
+                    content = package,
+                    artifact = artifact,
+                    relative_path = package.relative_path,
+                )
+            except Exception:
+                # We now know that the package exists and fetch it.
+                package = models.Package.objects.filter(name=name, version=version, build=build, extension=extension).first()
 
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            # Attach the package to the specified repository.
+            result = dispatch(
+                tasks.publish_package,
+                kwargs = {"repository_pk": repository.pk, "package_pk": package.pk},
+                exclusive_resources = [repository, package],
+            )
 
+            return core.OperationPostponedResponse(result, request)
+        else:
+            return Response("Package already exists in specified repository.")
+
+class RepodataFilter(core.ContentFilter):
+    """
+    FilterSet for Repodata.
+    """
+
+    sha256 = CharFilter(field_name="digest")
+
+    class Meta:
+        model = models.Repodata
+        fields = ["sha256"]
+
+class RepodataViewSet(core.SingleArtifactContentUploadViewSet):
+    """
+    A ViewSet for Repodata.
+
+    Define endpoint name which will appear in the API endpoint for this content type.
+    For example:
+        https://pulp.example.com/pulp/api/v3/content/conda/repodatas/
+
+    Also specify queryset and serializer for Package.
+    """
+
+    endpoint_name = "repodatas"
+    queryset = models.Repodata.objects.all()
+    serializer_class = serializers.RepodataSerializer
+    filterset_class = RepodataFilter
+
+    @transaction.atomic
+    def create(self, request):
+        """
+        Handle repodata.json upload.
+        """
+
+        file = request.data["file"]
+        repository_name = request.data["repository"]
+
+        if not repository_name:
+            return None
+
+        repository = models.CondaRepository.objects.get(name=repository_name)
+        try:
+            temp_file = PulpTemporaryFile(file=file)
+            artifact = Artifact.from_pulp_temporary_file(temp_file)
+        except Exception:
+            temp_file.delete()
+            return None
+
+        data = {
+            "digest": artifact.sha256,
+            "relative_path": "repodata.json",
+        }
+
+        serializer = serializers.RepodataSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        repodata = models.Repodata.objects.filter(digest=artifact.sha256).first()
+        if not repodata:
+            repodata = models.Repodata(
+                digest = artifact.sha256,
+            )
+
+            repodata.save()
+
+            ContentArtifact.objects.create(
+                content = repodata,
+                artifact = artifact,
+                relative_path = repodata.relative_path,
+            )
+
+            result = dispatch(
+                tasks.publish_repodata,
+                kwargs = {"repository_pk": repository.pk, "repodata_pk": repodata.pk},
+                exclusive_resources = [repository, repodata],
+            )
+
+            return core.OperationPostponedResponse(result, request)
+        else:
+            artifact.delete()
+            return None
 
 class CondaRemoteFilter(RemoteFilter):
     """
