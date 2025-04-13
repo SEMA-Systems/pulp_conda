@@ -9,7 +9,7 @@ In order to upload a conda package to Pulp there are two steps that have to be d
 1. Upload the package
 1. Upload the corresponding `repodata.json` for the `noarch` and your own architecture
 
-### Workflow
+### Upload package
 
 1. Create a `noarch` repository. **Without a `noarch` repository the `conda` CLI will not work!**
 ```sh
@@ -39,19 +39,29 @@ curl -sk -u <username>:<password> -X POST "<base_url>/pulp/api/v3/distributions/
 -H "Content-Type: application/json"
 ```
 
-5. Upload a package and attach it to the repository for your architecture. A new repository version is automatically crated.
+5. Upload a package and attach it to the repository for your architecture. A new repository version is automatically created.
 ```sh
 curl -sk -u <username>:<password> "<base_url>/pulp/api/v3/content/conda/packages/" \
 -F "file=@<path_to_file>" -F "repository=<repository_name>"
 ```
 
-6. Upload a `repodata.json` for the `noarch` repository. **Without a `repodata.json` in the `noarch` repository, the `conda` CLI will not work!**
+### Upload `repodata.json`
+
+1. Generate the `repodata.json` files for the uploaded packages in a local conda environment using the helper script `scripts/gen_repodata.py`.
+```sh
+pip install -r requirements.txt
+conda install -y conda-index
+
+./gen_repodata.py --repo-url "<base_url>/pulp/content/<repository_base_name>" --archs noarch,linux-64
+```
+
+2. Upload a `repodata.json` for the `noarch` repository. **Without a `repodata.json` in the `noarch` repository, the `conda` CLI will not work!**
 ```sh
 curl -sk -u <username>:<password> "<base_url>/pulp/api/v3/content/conda/repodatas/" \
 -F "file=@<path_to_file>" -F "repository=conda/noarch"
 ```
 
-7. Upload a `repodata.json` for your architecture. **Without a `repodata.json` the `conda` CLI will cannot resolve your package!**
+3. Upload a `repodata.json` for your architecture. **Without a `repodata.json` the `conda` CLI will cannot resolve your package!**
 ```sh
 curl -sk -u <username>:<password> "<base_url>/pulp/api/v3/content/conda/repodatas/" \
 -F "file=@<path_to_file>" -F "repository=<repository_name>"
@@ -108,9 +118,3 @@ channels:
 ```
 
 The `conda` CLI automatically adds the suffix for the architecture used (e.g. `linux-64`) and looks for the `repodata.json` files in the `noarch` repository and architecture repository (e.g. `linux-64`).
-
-## How to create `repodata.json` files for your packages
-
-A detailed description on how to create `repodata.json` files for your packages can be found here: https://docs.conda.io/projects/conda-build/en/latest/concepts/generating-index.html
-
-Note that without an up-to-date `repodata.json` in your repository, the `conda` CLI cannot find the correct packages! Therefore, the `repodata.json` has to be created manually for **ALL** packages in the repository. That means that you need to find a way to have all packages on your disk to create the `repodata.json`, i.e. all packages that you want to have in your repository version need to be downloaded in order to create the `repodata.json`.
